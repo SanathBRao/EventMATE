@@ -9,18 +9,6 @@ def init_db():
     conn = sqlite3.connect("eventmate.db", check_same_thread=False)
     c = conn.cursor()
 
-    # Attendees table
-    c.execute('''CREATE TABLE IF NOT EXISTS attendees (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT,
-                    email TEXT
-                )''')
-    try:
-        c.execute("ALTER TABLE attendees ADD COLUMN phone TEXT;")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  
-
     # Schedule table
     c.execute('''CREATE TABLE IF NOT EXISTS schedule (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,7 +17,17 @@ def init_db():
                     hall TEXT
                 )''')
 
-    # Announcements table
+    # Attendees table (linked to schedule)
+    c.execute('''CREATE TABLE IF NOT EXISTS attendees (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    email TEXT,
+                    phone TEXT,
+                    event_id INTEGER,
+                    FOREIGN KEY (event_id) REFERENCES schedule(id)
+                )''')
+
+    # Announcements
     c.execute('''CREATE TABLE IF NOT EXISTS announcements (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     message TEXT,
@@ -38,7 +36,6 @@ def init_db():
 
     conn.commit()
     return conn, c
-
 
 conn, c = init_db()
 
@@ -62,10 +59,16 @@ def home_page():
 def registration_page():
     st.header("📝 Event Registration")
 
+    schedules = c.execute("SELECT * FROM schedule").fetchall()
+    if not schedules:
+        st.warning("⚠️ No events available for registration.")
+        return
+
     with st.form("register_form"):
         name = st.text_input("Full Name")
         email = st.text_input("Email")
         phone = st.text_input("Phone Number")
+        event_choice = st.selectbox("Select Event", [f"{s[1]} ({s[2]}, Hall {s[3]})" for s in schedules])
         submit = st.form_submit_button("Register")
 
         if submit:
@@ -74,10 +77,11 @@ def registration_page():
             elif not re.match(r"[^@]+@gmail\.com$", email):
                 st.error("⚠️ Please enter a valid Gmail address.")
             else:
-                c.execute("INSERT INTO attendees (name, email, phone) VALUES (?,?,?)",
-                          (name, email, phone))
+                event_id = schedules[[f"{s[1]} ({s[2]}, Hall {s[3]})" for s in schedules].index(event_choice)][0]
+                c.execute("INSERT INTO attendees (name, email, phone, event_id) VALUES (?,?,?,?)",
+                          (name, email, phone, event_id))
                 conn.commit()
-                st.success(f"✅ {name} registered successfully!")
+                st.success(f"✅ {name} registered successfully for {event_choice}!")
 
 # -----------------------
 # Schedule Page
@@ -164,14 +168,19 @@ def admin_dashboard():
             conn.commit()
             st.success("✅ Event deleted successfully!")
 
-    # View Attendees
+    # View Attendees (per event)
     st.subheader("👥 Registered Attendees")
-    attendees = c.execute("SELECT * FROM attendees").fetchall()
-    if attendees:
-        for a in attendees:
-            st.write(f"- {a[1]} ({a[2]}, 📞 {a[3] if a[3] else 'N/A'})")
-    else:
-        st.info("No attendees registered yet.")
+    schedules = c.execute("SELECT * FROM schedule").fetchall()
+    if schedules:
+        selected_event = st.selectbox("Select Event to View Attendees", 
+                                      [f"{s[1]} ({s[2]}, Hall {s[3]})" for s in schedules])
+        event_id = schedules[[f"{s[1]} ({s[2]}, Hall {s[3]})" for s in schedules].index(selected_event)][0]
+        attendees = c.execute("SELECT name, email, phone FROM attendees WHERE event_id=?", (event_id,)).fetchall()
+        if attendees:
+            for a in attendees:
+                st.write(f"- {a[0]} ({a[1]}, 📞 {a[2]})")
+        else:
+            st.info("No attendees registered for this event yet.")
 
     # Logout
     if st.button("🚪 Logout"):
