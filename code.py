@@ -5,28 +5,33 @@ import re
 # ======================
 # 📂 Database Setup
 # ======================
-conn = sqlite3.connect("eventmate.db", check_same_thread=False)
-c = conn.cursor()
+def init_db():
+    conn = sqlite3.connect("eventmate.db", check_same_thread=False)
+    c = conn.cursor()
 
-c.execute('''CREATE TABLE IF NOT EXISTS attendees (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                email TEXT,
-                phone TEXT
-            )''')
+    # Ensure all tables exist
+    c.execute('''CREATE TABLE IF NOT EXISTS attendees (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    email TEXT,
+                    phone TEXT
+                )''')
 
-c.execute('''CREATE TABLE IF NOT EXISTS announcements (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message TEXT
-            )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS announcements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message TEXT
+                )''')
 
-c.execute('''CREATE TABLE IF NOT EXISTS schedule (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                event TEXT,
-                time TEXT,
-                hall TEXT
-            )''')
-conn.commit()
+    c.execute('''CREATE TABLE IF NOT EXISTS schedule (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event TEXT,
+                    time TEXT,
+                    hall TEXT
+                )''')
+    conn.commit()
+    return conn, c
+
+conn, c = init_db()
 
 # ======================
 # 🎨 Streamlit UI
@@ -74,10 +79,15 @@ elif choice == "Register":
         elif not re.match(r"[^@]+@gmail\.com$", email):
             st.error("⚠️ Email must be a valid Gmail address (ends with @gmail.com).")
         else:
-            c.execute("INSERT INTO attendees (name, email, phone) VALUES (?,?,?)",
-                      (name, email, phone))
-            conn.commit()
-            st.success("✅ Successfully Registered!")
+            try:
+                c.execute("INSERT INTO attendees (name, email, phone) VALUES (?,?,?)",
+                          (name, email, phone))
+                conn.commit()
+                st.success("✅ Successfully Registered!")
+            except sqlite3.OperationalError as e:
+                st.error(f"⚠️ Database error: {e}")
+                st.info("Reinitializing database...")
+                conn, c = init_db()
 
 # ======================
 # 🔑 Admin Dashboard
