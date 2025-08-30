@@ -2,24 +2,11 @@ import streamlit as st
 import sqlite3
 import os
 from datetime import datetime
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, AIMessage
-import google.generativeai as genai
 
 # ===============================
 # 🎯 CONFIG
 # ===============================
 st.set_page_config(page_title="Smart Event Organizer", layout="wide")
-
-# 🔑 Configure API key
-API_KEY = os.getenv("GOOGLE_API_KEY")
-if not API_KEY:
-    st.error("⚠️ GOOGLE_API_KEY not found in environment variables.")
-else:
-    genai.configure(api_key=API_KEY)
-
-# LangChain LLM
-llm_text = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 
 # ===============================
 # 🗄️ DATABASE SETUP
@@ -47,7 +34,7 @@ conn.commit()
 st.sidebar.title("📋 Navigation")
 menu = st.sidebar.radio(
     "Go to",
-    ["🏠 Home", "📝 Register", "📅 Schedule", "💬 Chatbot", "🛠 Admin Dashboard"]
+    ["🏠 Home", "📝 Register", "📅 Schedule", "🛠 Admin Dashboard"]
 )
 
 # ===============================
@@ -55,15 +42,15 @@ menu = st.sidebar.radio(
 # ===============================
 if menu == "🏠 Home":
     st.title("🎉 Smart Event Organizer")
-    st.subheader("One-stop solution for registrations, scheduling, and assistance")
+    st.subheader("One-stop solution for registrations, scheduling, and announcements")
 
     st.markdown("""
     Welcome to the **Smart Event Organizer** 🚀  
     Features:
     - Register for events easily  
     - View upcoming schedules  
-    - Ask our AI Chatbot for instant help  
-    - Check announcements from organizers
+    - Check announcements from organizers  
+    - Manage everything with the admin dashboard
     """)
 
     st.subheader("📢 Announcements")
@@ -113,38 +100,6 @@ elif menu == "📅 Schedule":
     }
     for event, timing in schedule.items():
         st.write(f"📌 **{event}** → 🕒 {timing}")
-
-# ===============================
-# 💬 CHATBOT
-# ===============================
-elif menu == "💬 Chatbot":
-    st.title("🤖 Event Assistant Chatbot")
-
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-        st.session_state.llm_history = []
-
-    # Chat input
-    user_input = st.chat_input("Ask me anything about the event...")
-
-    if user_input:
-        st.session_state.chat_history.append({"role": "user", "content": user_input})
-        st.session_state.llm_history.append(HumanMessage(content=user_input))
-
-        with st.spinner("🤔 Thinking..."):
-            try:
-                response = llm_text.invoke(st.session_state.llm_history)
-                st.session_state.chat_history.append({"role": "assistant", "content": response.content})
-                st.session_state.llm_history.append(AIMessage(content=response.content))
-            except Exception as e:
-                st.session_state.chat_history.append({"role": "assistant", "content": f"❌ Error: {str(e)}"})
-
-    # Display Chat
-    for msg in st.session_state.chat_history:
-        if msg["role"] == "user":
-            st.chat_message("user").write(msg["content"])
-        else:
-            st.chat_message("assistant").write(msg["content"])
 
 # ===============================
 # 🛠 ADMIN DASHBOARD
