@@ -12,7 +12,7 @@ import google.generativeai as genai
 st.set_page_config(page_title="Smart Event Organizer", layout="wide")
 
 # 🔑 Configure API key
-API_KEY = os.getenv("GOOGLE_API_KEY")
+API_KEY = os.getenv("AIzaSyBhvjm6m7A2ZrJ7ogDl7GW8xt6dcY53M4c")
 if not API_KEY:
     st.error("⚠️ GOOGLE_API_KEY not found in environment variables.")
 else:
