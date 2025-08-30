@@ -1,5 +1,18 @@
+# Web frameworks
 flask
-flask-cors
-gunicorn
+streamlit
+
+# Database
 sqlalchemy
-firebase-admin
+sqlite-utils
+
+# LangChain + Google Gemini
+langchain
+langchain-core
+langchain-google-genai
+google-generativeai
+
+# Utilities
+pillow
+python-dotenv
+requests
