@@ -1,18 +1,7 @@
-# Web frameworks
-flask
 streamlit
-
-# Database
-sqlalchemy
-sqlite-utils
-
-# LangChain + Google Gemini
-langchain
-langchain-core
-langchain-google-genai
-google-generativeai
-
-# Utilities
-pillow
+flask
 python-dotenv
-requests
+google-generativeai
+langchain
+langchain-google-genai
+pillow
