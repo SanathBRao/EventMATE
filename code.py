@@ -1,247 +1,250 @@
 import streamlit as st
 import sqlite3
-import re
-from datetime import datetime
 
-# ---------------- DATABASE ---------------- #
-DB_NAME = "events.db"
-
-def get_connection():
-    return sqlite3.connect(DB_NAME, check_same_thread=False)
-
+# ----------------- DATABASE SETUP -----------------
 def init_db():
-    conn = get_connection()
+    conn = sqlite3.connect("eventmate.db")
     c = conn.cursor()
+
+    # Events
+    c.execute('''CREATE TABLE IF NOT EXISTS events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    date TEXT,
+                    time TEXT,
+                    hall TEXT)''')
+
+    # Attendees (linked to events)
+    c.execute('''CREATE TABLE IF NOT EXISTS attendees (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id INTEGER,
+                    name TEXT,
+                    email TEXT,
+                    phone TEXT,
+                    FOREIGN KEY(event_id) REFERENCES events(id))''')
+
     # Announcements
     c.execute('''CREATE TABLE IF NOT EXISTS announcements (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     message TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
-    # Schedule
-    c.execute('''CREATE TABLE IF NOT EXISTS schedule (
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+
+    # Admin credentials
+    c.execute('''CREATE TABLE IF NOT EXISTS admins (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_name TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    time TEXT NOT NULL,
-                    hall TEXT NOT NULL
-                )''')
-    # Attendees
-    c.execute('''CREATE TABLE IF NOT EXISTS attendees (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    email TEXT NOT NULL,
-                    phone TEXT NOT NULL,
-                    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(event_id) REFERENCES schedule(id)
-                )''')
+                    username TEXT UNIQUE,
+                    password TEXT)''')
+
+    # Default admin
+    c.execute("SELECT * FROM admins WHERE username=?", ("admin",))
+    if not c.fetchone():
+        c.execute("INSERT INTO admins (username, password) VALUES (?, ?)", ("admin", "admin"))
+
     conn.commit()
     conn.close()
 
-init_db()
+# ----------------- PAGES -----------------
+def home_page():
+    st.title("🏠 Welcome to EventMate")
 
-# ---------------- HELPER FUNCTIONS ---------------- #
-def validate_email(email):
-    return bool(re.match(r"[^@]+@gmail\.com$", email))
-
-def validate_phone(phone):
-    return phone.isdigit() and (7 <= len(phone) <= 12)
-
-# ---------------- USER SIDE ---------------- #
-def home():
-    st.title("🎉 EventMate – Event Management System")
-
-    # Show Announcements
     st.header("📢 Announcements")
-    conn = get_connection()
+    conn = sqlite3.connect("eventmate.db")
     c = conn.cursor()
-    announcements = c.execute("SELECT message, created_at FROM announcements ORDER BY id DESC").fetchall()
+    announcements = c.execute("SELECT message, created_at FROM announcements ORDER BY created_at DESC").fetchall()
     conn.close()
+
     if announcements:
-        for msg, ts in announcements:
-            st.info(f"{msg} \n\n ⏰ {ts}")
+        for msg, created in announcements:
+            st.info(f"**{created}** — {msg}")
     else:
         st.write("No announcements yet.")
 
-    # Show Schedule
-    st.header("📅 Event Schedule")
-    conn = get_connection()
+    st.header("📅 Upcoming Events")
+    conn = sqlite3.connect("eventmate.db")
     c = conn.cursor()
-    events = c.execute("SELECT id, event_name, date, time, hall FROM schedule ORDER BY date, time").fetchall()
+    events = c.execute("SELECT id, title, description, date, time, hall FROM events").fetchall()
     conn.close()
+
     if events:
-        for eid, name, date, time, hall in events:
-            st.write(f"**{name}**  \n📍 {hall} | 📅 {date} | 🕒 {time}")
+        for eid, title, desc, date, time, hall in events:
+            with st.expander(f"📌 {title} — {date} {time} @ {hall}"):
+                st.write(desc if desc else "No description available.")
+                if st.button(f"Register for {title}", key=f"register_{eid}"):
+                    st.session_state.page = "register"
+                    st.session_state.selected_event = eid
+                    st.rerun()
     else:
-        st.write("No events scheduled yet.")
+        st.write("No upcoming events.")
 
-    # Register for an Event
-    st.header("📝 Register for an Event")
-    if events:
-        event_choice = st.selectbox("Select Event", [f"{eid} - {name}" for eid, name, _, _, _ in events])
-        event_id = int(event_choice.split(" - ")[0])
-        name = st.text_input("Your Name")
-        email = st.text_input("Your Email (must be @gmail.com)")
-        phone = st.text_input("Phone Number")
+def register_page():
+    st.title("📝 Event Registration")
 
-        if st.button("Register"):
-            if not name or not email or not phone:
-                st.error("⚠️ All fields are required.")
-            elif not validate_email(email):
-                st.error("⚠️ Email must be a valid @gmail.com address.")
-            elif not validate_phone(phone):
-                st.error("⚠️ Phone must be digits (7-12).")
-            else:
-                conn = get_connection()
-                c = conn.cursor()
-                c.execute("INSERT INTO attendees (event_id, name, email, phone) VALUES (?,?,?,?)",
-                          (event_id, name, email, phone))
-                conn.commit()
-                conn.close()
-                st.success("✅ Registration successful!")
-    else:
-        st.info("No events available to register.")
+    event_id = st.session_state.get("selected_event")
+    if not event_id:
+        st.warning("⚠️ No event selected.")
+        return
 
-# ---------------- ADMIN SIDE ---------------- #
+    conn = sqlite3.connect("eventmate.db")
+    c = conn.cursor()
+    event = c.execute("SELECT title FROM events WHERE id=?", (event_id,)).fetchone()
+    conn.close()
+
+    if not event:
+        st.error("Event not found.")
+        return
+
+    st.subheader(f"Register for: {event[0]}")
+
+    name = st.text_input("Full Name")
+    email = st.text_input("Email (must end with @gmail.com)")
+    phone = st.text_input("Phone Number")
+
+    if st.button("Submit Registration"):
+        if not name or not email or not phone:
+            st.error("All fields are required.")
+        elif "@gmail.com" not in email:
+            st.error("Email must be a valid Gmail address.")
+        else:
+            conn = sqlite3.connect("eventmate.db")
+            c = conn.cursor()
+            c.execute("INSERT INTO attendees (event_id, name, email, phone) VALUES (?, ?, ?, ?)",
+                      (event_id, name, email, phone))
+            conn.commit()
+            conn.close()
+            st.success("✅ Registration successful!")
+
+def admin_login():
+    st.title("🔑 Admin Login")
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        conn = sqlite3.connect("eventmate.db")
+        c = conn.cursor()
+        c.execute("SELECT * FROM admins WHERE username=? AND password=?", (username, password))
+        admin = c.fetchone()
+        conn.close()
+
+        if admin:
+            st.session_state.admin_logged_in = True
+            st.rerun()
+        else:
+            st.error("Invalid username or password.")
+
 def admin_dashboard():
-    st.subheader("📊 Admin Dashboard")
+    st.title("📊 Admin Dashboard")
 
-    tab1, tab2, tab3 = st.tabs(["Announcements", "Schedule", "Attendees"])
+    tab1, tab2, tab3 = st.tabs(["📢 Announcements", "📅 Events", "📝 Registrations"])
 
-    # -------- ANNOUNCEMENTS -------- #
+    # ---------------- ANNOUNCEMENTS ----------------
     with tab1:
-        st.write("### Manage Announcements")
-        msg = st.text_area("New Announcement", key="announcement_input")
+        st.subheader("Manage Announcements")
+        msg = st.text_area("New Announcement")
         if st.button("Post Announcement"):
             if msg.strip():
-                conn = get_connection()
+                conn = sqlite3.connect("eventmate.db")
                 c = conn.cursor()
                 c.execute("INSERT INTO announcements (message) VALUES (?)", (msg,))
                 conn.commit()
                 conn.close()
-                st.success("✅ Announcement posted!")
-                st.session_state["announcement_input"] = ""  # clear
-            else:
-                st.warning("⚠️ Cannot post empty announcement.")
+                st.success("Announcement posted!")
+                st.rerun()
 
-        # Show + delete announcements
-        conn = get_connection()
+        conn = sqlite3.connect("eventmate.db")
         c = conn.cursor()
-        announcements = c.execute("SELECT id, message FROM announcements ORDER BY id DESC").fetchall()
+        announcements = c.execute("SELECT id, message, created_at FROM announcements ORDER BY created_at DESC").fetchall()
         conn.close()
-        if announcements:
-            for aid, text in announcements:
-                col1, col2 = st.columns([4,1])
-                with col1:
-                    st.info(f"🆔 {aid} — {text}")
-                with col2:
-                    if st.button("❌ Delete", key=f"del_a{aid}"):
-                        conn = get_connection()
-                        c = conn.cursor()
-                        c.execute("DELETE FROM announcements WHERE id=?", (aid,))
-                        conn.commit()
-                        conn.close()
-                        st.success("Announcement deleted!")
-                        st.experimental_rerun()
-        else:
-            st.info("No announcements yet.")
 
-    # -------- SCHEDULE -------- #
+        for aid, message, created in announcements:
+            st.write(f"📢 **{message}** ({created})")
+            if st.button("Delete", key=f"del_ann_{aid}"):
+                conn = sqlite3.connect("eventmate.db")
+                c = conn.cursor()
+                c.execute("DELETE FROM announcements WHERE id=?", (aid,))
+                conn.commit()
+                conn.close()
+                st.warning("Announcement deleted.")
+                st.rerun()
+
+    # ---------------- EVENTS ----------------
     with tab2:
-        st.write("### Manage Schedule")
-        with st.form("add_event"):
-            name = st.text_input("Event Name")
-            date = st.date_input("Date")
-            time = st.time_input("Time")
-            hall = st.text_input("Hall")
-            submitted = st.form_submit_button("Add Event")
-            if submitted:
-                if name and hall:
-                    conn = get_connection()
-                    c = conn.cursor()
-                    c.execute("INSERT INTO schedule (event_name, date, time, hall) VALUES (?,?,?,?)",
-                              (name, str(date), str(time), hall))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"✅ Event '{name}' added!")
-                    st.experimental_rerun()
-                else:
-                    st.error("⚠️ Event name and hall are required.")
+        st.subheader("Manage Events")
+        title = st.text_input("Event Title")
+        desc = st.text_area("Description")
+        date = st.date_input("Date")
+        time = st.time_input("Time")
+        hall = st.text_input("Hall")
 
-        # Show + delete events
-        conn = get_connection()
+        if st.button("Add Event"):
+            if title and hall:
+                conn = sqlite3.connect("eventmate.db")
+                c = conn.cursor()
+                c.execute("INSERT INTO events (title, description, date, time, hall) VALUES (?, ?, ?, ?, ?)",
+                          (title, desc, str(date), str(time), hall))
+                conn.commit()
+                conn.close()
+                st.success("Event added successfully!")
+                st.rerun()
+
+        conn = sqlite3.connect("eventmate.db")
         c = conn.cursor()
-        events = c.execute("SELECT id, event_name, date, time, hall FROM schedule").fetchall()
+        events = c.execute("SELECT id, title, date, time, hall FROM events").fetchall()
         conn.close()
-        if events:
-            for eid, name, date, time, hall in events:
-                col1, col2 = st.columns([4,1])
-                with col1:
-                    st.write(f"🆔 {eid} — {name} ({date} {time} - {hall})")
-                with col2:
-                    if st.button("❌ Delete", key=f"del_e{eid}"):
-                        conn = get_connection()
-                        c = conn.cursor()
-                        c.execute("DELETE FROM schedule WHERE id=?", (eid,))
-                        conn.commit()
-                        conn.close()
-                        st.success("Event deleted!")
-                        st.experimental_rerun()
-        else:
-            st.info("No events scheduled.")
 
-    # -------- ATTENDEES -------- #
+        for eid, etitle, edate, etime, ehall in events:
+            st.write(f"📌 {etitle} — {edate} {etime} @ {ehall}")
+            if st.button("Delete", key=f"del_event_{eid}"):
+                conn = sqlite3.connect("eventmate.db")
+                c = conn.cursor()
+                c.execute("DELETE FROM events WHERE id=?", (eid,))
+                conn.commit()
+                conn.close()
+                st.warning("Event deleted.")
+                st.rerun()
+
+    # ---------------- REGISTRATIONS ----------------
     with tab3:
-        st.write("### Registered Attendees")
-        conn = get_connection()
-        c = conn.cursor()
-        events = c.execute("SELECT id, event_name FROM schedule").fetchall()
+        st.subheader("Event Registrations")
 
-        if not events:
-            st.warning("No events available yet.")
-        else:
-            event_choice = st.selectbox("Select Event", [f"{e[0]} - {e[1]}" for e in events])
-            event_id = int(event_choice.split(" - ")[0])
+        conn = sqlite3.connect("eventmate.db")
+        c = conn.cursor()
+        events = c.execute("SELECT id, title FROM events").fetchall()
+        conn.close()
+
+        if events:
+            event_id = st.selectbox("Select Event", [eid for eid, _ in events],
+                                    format_func=lambda x: dict(events)[x])
+
+            conn = sqlite3.connect("eventmate.db")
+            c = conn.cursor()
             attendees = c.execute("SELECT name, email, phone FROM attendees WHERE event_id=?", (event_id,)).fetchall()
             conn.close()
+
             if attendees:
-                for a in attendees:
-                    st.write(f"👤 {a[0]} | ✉️ {a[1]} | 📞 {a[2]}")
+                for name, email, phone in attendees:
+                    st.write(f"👤 {name} — {email} — {phone}")
             else:
-                st.info("No attendees registered for this event.")
+                st.write("No registrations for this event.")
+        else:
+            st.write("No events available.")
 
-# ---------------- ADMIN LOGIN ---------------- #
-def admin_login():
-    st.header("🔑 Admin Login")
-
-    if "admin_logged_in" not in st.session_state:
-        st.session_state["admin_logged_in"] = False
-
-    if st.session_state["admin_logged_in"]:
-        admin_dashboard()
-        if st.button("🚪 Logout"):
-            st.session_state["admin_logged_in"] = False
-            st.success("Logged out successfully.")
-    else:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.button("Login"):
-            if username == "admin" and password == "admin123":
-                st.session_state["admin_logged_in"] = True
-                st.success("✅ Login successful!")
-                st.experimental_rerun()
-            else:
-                st.error("Invalid credentials")
-
-# ---------------- MAIN APP ---------------- #
+# ----------------- MAIN -----------------
 def main():
     st.sidebar.title("📌 Navigation")
-    choice = st.sidebar.radio("Go to", ["Home", "Admin Login"])
+    choice = st.sidebar.radio("Go to", ["Home", "Register", "Admin"])
+
     if choice == "Home":
-        home()
-    elif choice == "Admin Login":
-        admin_login()
+        home_page()
+    elif choice == "Register":
+        register_page()
+    elif choice == "Admin":
+        if st.session_state.get("admin_logged_in"):
+            admin_dashboard()
+        else:
+            admin_login()
 
 if __name__ == "__main__":
+    init_db()
     main()
