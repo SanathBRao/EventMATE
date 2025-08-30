@@ -1,179 +1,182 @@
 import streamlit as st
 import sqlite3
-import os
-from datetime import datetime
+import re
 
-# ===============================
-# 🎯 CONFIG
-# ===============================
-st.set_page_config(page_title="Smart Event Organizer", layout="wide")
-
-# ===============================
-# 🗄️ DATABASE SETUP
-# ===============================
+# ======================
+# 📂 Database Setup
+# ======================
 conn = sqlite3.connect("eventmate.db", check_same_thread=False)
 c = conn.cursor()
 
-c.execute("""CREATE TABLE IF NOT EXISTS attendees (
+c.execute('''CREATE TABLE IF NOT EXISTS attendees (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT,
                 email TEXT,
-                event TEXT,
-                timestamp TEXT)""")
+                phone TEXT
+            )''')
 
-c.execute("""CREATE TABLE IF NOT EXISTS announcements (
+c.execute('''CREATE TABLE IF NOT EXISTS announcements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message TEXT,
-                timestamp TEXT)""")
+                message TEXT
+            )''')
 
+c.execute('''CREATE TABLE IF NOT EXISTS schedule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event TEXT,
+                time TEXT,
+                hall TEXT
+            )''')
 conn.commit()
 
-# ===============================
-# 📌 SIDEBAR MENU
-# ===============================
-st.sidebar.title("📋 Navigation")
-menu = st.sidebar.radio(
-    "Go to",
-    ["🏠 Home", "📝 Register", "📅 Schedule", "🛠 Admin Dashboard"]
-)
+# ======================
+# 🎨 Streamlit UI
+# ======================
+st.set_page_config(page_title="EventMate App", layout="wide")
+st.title("🎉 EventMate – Event Management App")
 
-# ===============================
-# 🏠 HOME
-# ===============================
-if menu == "🏠 Home":
-    st.title("🎉 Smart Event Organizer")
-    st.subheader("One-stop solution for registrations, scheduling, and announcements")
+menu = ["Home", "Register", "Admin Dashboard"]
+choice = st.sidebar.selectbox("📌 Navigate", menu)
 
-    st.markdown("""
-    Welcome to the **Smart Event Organizer** 🚀  
-    Features:
-    - Register for events easily  
-    - View upcoming schedules  
-    - Check announcements from organizers  
-    - Manage everything with the admin dashboard
-    """)
-
-    st.subheader("📢 Announcements")
-    announcements = c.execute("SELECT message, timestamp FROM announcements ORDER BY id DESC").fetchall()
+# ======================
+# 🏠 Home
+# ======================
+if choice == "Home":
+    st.header("📢 Announcements")
+    announcements = c.execute("SELECT message FROM announcements").fetchall()
     if announcements:
-        for a in announcements:
-            st.info(f"📌 {a[0]}  _(Posted: {a[1]})_")
+        for ann in announcements:
+            st.info(f"📌 {ann[0]}")
     else:
         st.write("No announcements yet.")
 
-# ===============================
-# 📝 REGISTRATION
-# ===============================
-elif menu == "📝 Register":
-    st.title("📝 Event Registration")
+    st.header("📅 Event Schedule")
+    schedule = c.execute("SELECT event, time, hall FROM schedule").fetchall()
+    if schedule:
+        for s in schedule:
+            st.success(f"**{s[0]}** → 🕒 {s[1]} • Hall {s[2]}")
+    else:
+        st.write("No schedule available.")
 
+# ======================
+# 📝 Registration
+# ======================
+elif choice == "Register":
+    st.header("📝 Register for Event")
     with st.form("register_form"):
         name = st.text_input("Full Name")
         email = st.text_input("Email")
-        event = st.selectbox("Select Event", ["Hackathon", "Workshop", "Seminar", "Cultural Fest"])
+        phone = st.text_input("Phone")
         submit = st.form_submit_button("Register")
 
     if submit:
-        if name and email and event:
-            c.execute("INSERT INTO attendees (name, email, event, timestamp) VALUES (?,?,?,?)",
-                      (name, email, event, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            conn.commit()
-            st.success(f"✅ {name}, you are registered for {event}!")
+        if not name.strip() or not email.strip() or not phone.strip():
+            st.error("⚠️ All fields are required!")
+        elif not re.match(r"[^@]+@gmail\.com$", email):
+            st.error("⚠️ Email must be a valid Gmail address (ends with @gmail.com).")
         else:
-            st.error("⚠️ Please fill all fields.")
+            c.execute("INSERT INTO attendees (name, email, phone) VALUES (?,?,?)",
+                      (name, email, phone))
+            conn.commit()
+            st.success("✅ Successfully Registered!")
 
-    st.subheader("📌 Registered Attendees")
-    attendees = c.execute("SELECT name, email, event, timestamp FROM attendees").fetchall()
-    for a in attendees:
-        st.write(f"👤 {a[0]} | ✉️ {a[1]} | 🎯 {a[2]} | ⏰ {a[3]}")
+# ======================
+# 🔑 Admin Dashboard
+# ======================
+elif choice == "Admin Dashboard":
+    st.header("🛠 Admin Dashboard")
+    tabs = st.tabs(["👥 Attendees", "📢 Announcements", "📅 Schedule"])
 
-# ===============================
-# 📅 SCHEDULE
-# ===============================
-elif menu == "📅 Schedule":
-    st.title("📅 Event Schedule")
-    schedule = {
-        "Hackathon": "9:00 AM - 6:00 PM",
-        "Workshop": "10:00 AM - 1:00 PM",
-        "Seminar": "2:00 PM - 4:00 PM",
-        "Cultural Fest": "6:30 PM - 9:30 PM"
-    }
-    for event, timing in schedule.items():
-        st.write(f"📌 **{event}** → 🕒 {timing}")
-
-# ===============================
-# 🛠 ADMIN DASHBOARD
-# ===============================
-elif menu == "🛠 Admin Dashboard":
-    st.title("🛠 Admin Dashboard")
-
-    # Simple login system
-    if "admin_logged_in" not in st.session_state:
-        st.session_state.admin_logged_in = False
-
-    if not st.session_state.admin_logged_in:
-        password = st.text_input("Enter Admin Password", type="password")
-        if st.button("Login"):
-            if password == "admin123":  # demo password
-                st.session_state.admin_logged_in = True
-                st.success("✅ Logged in as Admin")
-            else:
-                st.error("❌ Wrong password")
-    else:
-        tab1, tab2 = st.tabs(["👥 Manage Attendees", "📢 Manage Announcements"])
-
-        # ======================
-        # 👥 Manage Attendees
-        # ======================
-        with tab1:
-            st.subheader("👥 Registered Attendees")
-            event_filter = st.selectbox("Filter by Event", ["All", "Hackathon", "Workshop", "Seminar", "Cultural Fest"])
-            
-            if event_filter == "All":
-                attendees = c.execute("SELECT id, name, email, event, timestamp FROM attendees").fetchall()
-            else:
-                attendees = c.execute("SELECT id, name, email, event, timestamp FROM attendees WHERE event=?",
-                                      (event_filter,)).fetchall()
-
-            if attendees:
-                for a in attendees:
-                    col1, col2, col3 = st.columns([4, 2, 1])
-                    with col1:
-                        st.write(f"👤 {a[1]} | ✉️ {a[2]} | 🎯 {a[3]} | ⏰ {a[4]}")
-                    with col3:
-                        if st.button("🗑 Delete", key=f"del_{a[0]}"):
-                            c.execute("DELETE FROM attendees WHERE id=?", (a[0],))
-                            conn.commit()
-                            st.success(f"Deleted {a[1]}")
-                            st.rerun()
-            else:
-                st.info("No attendees found.")
-
-        # ======================
-        # 📢 Manage Announcements
-        # ======================
-        with tab2:
-            st.subheader("📢 Post Announcement")
-            new_announcement = st.text_area("Write an announcement...")
-            if st.button("Post"):
-                if new_announcement.strip():
-                    c.execute("INSERT INTO announcements (message, timestamp) VALUES (?, ?)",
-                              (new_announcement, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                    conn.commit()
-                    st.success("✅ Announcement posted!")
-                    st.rerun()
-                else:
-                    st.error("⚠️ Please enter a message.")
-
-            st.subheader("📜 Existing Announcements")
-            announcements = c.execute("SELECT id, message, timestamp FROM announcements ORDER BY id DESC").fetchall()
-            for a in announcements:
-                col1, col2 = st.columns([6,1])
-                with col1:
-                    st.info(f"{a[1]} _(Posted: {a[2]})_")
-                with col2:
-                    if st.button("🗑", key=f"del_ann_{a[0]}"):
-                        c.execute("DELETE FROM announcements WHERE id=?", (a[0],))
+    # 👥 Manage Attendees
+    with tabs[0]:
+        st.subheader("👥 Registered Attendees")
+        attendees = c.execute("SELECT id, name, email, phone FROM attendees").fetchall()
+        if attendees:
+            for a in attendees:
+                with st.expander(f"{a[1]} ({a[2]})"):
+                    st.write(f"📞 Phone: {a[3]}")
+                    if st.button("🗑 Delete", key=f"del_att_{a[0]}"):
+                        c.execute("DELETE FROM attendees WHERE id=?", (a[0],))
                         conn.commit()
-                        st.success("Announcement deleted!")
+                        st.success("Attendee deleted!")
                         st.rerun()
+        else:
+            st.info("No attendees registered yet.")
+
+    # 📢 Manage Announcements
+    with tabs[1]:
+        st.subheader("📢 Add New Announcement")
+        with st.form("add_announcement"):
+            new_msg = st.text_input("Announcement Message")
+            add_submit = st.form_submit_button("Add")
+        if add_submit and new_msg.strip():
+            c.execute("INSERT INTO announcements (message) VALUES (?)", (new_msg,))
+            conn.commit()
+            st.success("✅ Announcement added!")
+            st.rerun()
+
+        st.subheader("📜 Existing Announcements")
+        anns = c.execute("SELECT id, message FROM announcements").fetchall()
+        if anns:
+            for ann in anns:
+                with st.expander(f"📌 {ann[1]}"):
+                    new_text = st.text_input("Edit Message", value=ann[1], key=f"edit_ann_{ann[0]}")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("💾 Update", key=f"upd_ann_{ann[0]}"):
+                            c.execute("UPDATE announcements SET message=? WHERE id=?", (new_text, ann[0]))
+                            conn.commit()
+                            st.success("Announcement updated!")
+                            st.rerun()
+                    with col2:
+                        if st.button("🗑 Delete", key=f"del_ann_{ann[0]}"):
+                            c.execute("DELETE FROM announcements WHERE id=?", (ann[0],))
+                            conn.commit()
+                            st.success("Announcement deleted!")
+                            st.rerun()
+        else:
+            st.info("No announcements yet.")
+
+    # 📅 Manage Schedule
+    with tabs[2]:
+        st.subheader("📅 Add New Schedule Item")
+        with st.form("add_schedule"):
+            event_name = st.text_input("Event Name")
+            time = st.text_input("Time (e.g., 9:00 AM - 6:00 PM)")
+            hall = st.text_input("Hall No/Name")
+            add_submit = st.form_submit_button("Add Schedule")
+
+        if add_submit:
+            if event_name.strip() and time.strip() and hall.strip():
+                c.execute("INSERT INTO schedule (event, time, hall) VALUES (?,?,?)",
+                          (event_name, time, hall))
+                conn.commit()
+                st.success(f"✅ Schedule added for {event_name}")
+                st.rerun()
+            else:
+                st.error("⚠️ Please fill all fields.")
+
+        st.subheader("📜 Existing Schedule")
+        schedule = c.execute("SELECT id, event, time, hall FROM schedule").fetchall()
+        if schedule:
+            for s in schedule:
+                with st.expander(f"📌 {s[1]} → 🕒 {s[2]} • Hall {s[3]}"):
+                    with st.form(f"edit_form_{s[0]}"):
+                        new_event = st.text_input("Event Name", value=s[1], key=f"e_{s[0]}")
+                        new_time = st.text_input("Time", value=s[2], key=f"t_{s[0]}")
+                        new_hall = st.text_input("Hall", value=s[3], key=f"h_{s[0]}")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.form_submit_button("💾 Update"):
+                                c.execute("UPDATE schedule SET event=?, time=?, hall=? WHERE id=?",
+                                          (new_event, new_time, new_hall, s[0]))
+                                conn.commit()
+                                st.success("✅ Schedule updated!")
+                                st.rerun()
+                        with col2:
+                            if st.form_submit_button("🗑 Delete"):
+                                c.execute("DELETE FROM schedule WHERE id=?", (s[0],))
+                                conn.commit()
+                                st.success("Schedule deleted!")
+                                st.rerun()
+        else:
+            st.info("No schedule items yet.")
