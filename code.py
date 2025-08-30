@@ -15,13 +15,11 @@ def init_db():
                     name TEXT,
                     email TEXT
                 )''')
-
-    # 🔧 Ensure phone column exists
     try:
         c.execute("ALTER TABLE attendees ADD COLUMN phone TEXT;")
         conn.commit()
     except sqlite3.OperationalError:
-        pass  # Column already exists
+        pass  
 
     # Schedule table
     c.execute('''CREATE TABLE IF NOT EXISTS schedule (
@@ -30,11 +28,33 @@ def init_db():
                     time TEXT,
                     hall TEXT
                 )''')
+
+    # Announcements table
+    c.execute('''CREATE TABLE IF NOT EXISTS announcements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message TEXT,
+                    date TEXT
+                )''')
+
     conn.commit()
     return conn, c
 
 
 conn, c = init_db()
+
+# -----------------------
+# Home Page (Announcements)
+# -----------------------
+def home_page():
+    st.header("🎉 Welcome to EventMate")
+    st.subheader("📢 Latest Announcements")
+
+    announcements = c.execute("SELECT * FROM announcements ORDER BY id DESC").fetchall()
+    if announcements:
+        for a in announcements:
+            st.info(f"📌 {a[1]}  —  🗓 {a[2]}")
+    else:
+        st.write("No announcements yet.")
 
 # -----------------------
 # Registration Page
@@ -49,7 +69,6 @@ def registration_page():
         submit = st.form_submit_button("Register")
 
         if submit:
-            # Validation
             if not name.strip() or not email.strip() or not phone.strip():
                 st.error("⚠️ All fields are required.")
             elif not re.match(r"[^@]+@gmail\.com$", email):
@@ -60,13 +79,11 @@ def registration_page():
                 conn.commit()
                 st.success(f"✅ {name} registered successfully!")
 
-
 # -----------------------
 # Schedule Page
 # -----------------------
 def schedule_page():
     st.header("📅 Event Schedule")
-
     schedules = c.execute("SELECT * FROM schedule").fetchall()
 
     if not schedules:
@@ -75,12 +92,49 @@ def schedule_page():
         for s in schedules:
             st.write(f"**{s[1]}** 🕒 {s[2]} 📍 Hall {s[3]}")
 
+# -----------------------
+# Admin Login
+# -----------------------
+def admin_login():
+    st.header("🔑 Admin Login")
+
+    if "admin_logged_in" not in st.session_state:
+        st.session_state.admin_logged_in = False
+
+    if not st.session_state.admin_logged_in:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            if username == "admin" and password == "admin123":  # demo credentials
+                st.session_state.admin_logged_in = True
+                st.success("✅ Logged in successfully!")
+            else:
+                st.error("❌ Invalid credentials")
+    else:
+        admin_dashboard()
 
 # -----------------------
 # Admin Dashboard
 # -----------------------
 def admin_dashboard():
     st.header("🛠️ Admin Dashboard")
+
+    # Announcements
+    st.subheader("📢 Post Announcement")
+    with st.form("announcement_form"):
+        message = st.text_area("Announcement")
+        date = st.text_input("Date (e.g., 30-Aug-2025)")
+        submit_announcement = st.form_submit_button("Post")
+
+        if submit_announcement:
+            if not message or not date:
+                st.error("⚠️ All fields required")
+            else:
+                c.execute("INSERT INTO announcements (message, date) VALUES (?,?)",
+                          (message, date))
+                conn.commit()
+                st.success("✅ Announcement posted!")
 
     # Add Schedule
     st.subheader("➕ Add Event to Schedule")
@@ -119,16 +173,22 @@ def admin_dashboard():
     else:
         st.info("No attendees registered yet.")
 
+    # Logout
+    if st.button("🚪 Logout"):
+        st.session_state.admin_logged_in = False
+        st.success("Logged out successfully")
 
 # -----------------------
 # Main Navigation
 # -----------------------
 st.sidebar.title("📌 Navigation")
-page = st.sidebar.radio("Go to", ["Registration", "Schedule", "Admin Dashboard"])
+page = st.sidebar.radio("Go to", ["Home", "Registration", "Schedule", "Admin Login"])
 
-if page == "Registration":
+if page == "Home":
+    home_page()
+elif page == "Registration":
     registration_page()
 elif page == "Schedule":
     schedule_page()
-elif page == "Admin Dashboard":
-    admin_dashboard()
+elif page == "Admin Login":
+    admin_login()
