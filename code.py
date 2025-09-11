@@ -19,6 +19,7 @@ if "logged_in" not in st.session_state:
 # =========================================================
 # 🔹 Gemini Setup
 # =========================================================
+load_pro.env
 API_KEY = os.getenv("GOOGLE_API_KEY")
 if API_KEY:
     genai.configure(api_key=API_KEY)
