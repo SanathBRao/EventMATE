@@ -1,236 +1,140 @@
 import streamlit as st
-import sqlite3
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, AIMessage
+import google.generativeai as genai
+import base64
+from PIL import Image
+from io import BytesIO
 import os
 
-# ----------------------------
-# Database Setup
-# ----------------------------
-DB_FILE = "eventmate.db"
+# =========================================================
+# 🔑 Default Login Credentials
+# =========================================================
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "12345"
 
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
-    # Announcements
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS announcements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message TEXT NOT NULL
-        )
-    """)
+# =========================================================
+# 🔹 Gemini Setup
+# =========================================================
+API_KEY = os.getenv("GOOGLE_API_KEY")
+if API_KEY:
+    genai.configure(api_key=API_KEY)
+else:
+    st.error("⚠️ GOOGLE_API_KEY not found in environment variables.")
 
-    # Events
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            date TEXT NOT NULL,
-            location TEXT NOT NULL
-        )
-    """)
+# LangChain Text Model
+llm_text = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 
-    # Attendees (linked to events)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS attendees (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            event_id INTEGER NOT NULL,
-            FOREIGN KEY(event_id) REFERENCES events(id)
-        )
-    """)
+# Gemini Image Model
+image_model = genai.GenerativeModel("gemini-2.0-flash-preview-image")
 
-    # Admins
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS admins (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-    """)
+# =========================================================
+# 🔹 Chatbot State Initialization
+# =========================================================
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []  # for display
+if "llm_history" not in st.session_state:
+    st.session_state.llm_history = []  # structured conversation memory
 
-    # Add default admin if none exists
-    c.execute("SELECT * FROM admins WHERE username=?", ("admin",))
-    if not c.fetchone():
-        c.execute("INSERT INTO admins (username, password) VALUES (?, ?)", ("admin", "admin123"))
+# =========================================================
+# 🔹 Login Page
+# =========================================================
+def login_page():
+    st.title("🔑 Login")
 
-    conn.commit()
-    conn.close()
+    username = st.text_input("Username").strip().lower()
+    password = st.text_input("Password", type="password").strip()
 
-def reset_db():
-    """Delete and recreate DB schema (use only if schema mismatches)."""
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-    init_db()
-
-# ----------------------------
-# Home Page (Announcements + Events + Registration)
-# ----------------------------
-def home_page():
-    st.title("🏠 EventMate")
-    st.subheader("📢 Latest Announcements")
-
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    announcements = c.execute("SELECT message FROM announcements ORDER BY id DESC").fetchall()
-    if announcements:
-        for ann in announcements:
-            st.info(ann[0])
-    else:
-        st.write("No announcements yet.")
-
-    st.subheader("📅 Upcoming Events")
-    events = c.execute("SELECT id, name, date, location FROM events ORDER BY date").fetchall()
-    if events:
-        for event in events:
-            st.write(f"### {event[1]}")
-            st.write(f"📆 Date: {event[2]}")
-            st.write(f"📍 Location: {event[3]}")
-
-            if st.button(f"Register for {event[1]}", key=f"regbtn{event[0]}"):
-                st.session_state["register_event_id"] = event[0]
-                st.session_state["page"] = "register"
-                st.experimental_rerun()
-    else:
-        st.write("No events available yet.")
-
-    conn.close()
-
-# ----------------------------
-# Registration Page
-# ----------------------------
-def registration_page():
-    event_id = st.session_state.get("register_event_id", None)
-    if not event_id:
-        st.error("⚠️ No event selected for registration.")
-        return
-
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    event = c.execute("SELECT name FROM events WHERE id=?", (event_id,)).fetchone()
-    conn.close()
-
-    st.title(f"📝 Register for {event[0]}")
-
-    with st.form("registration_form"):
-        name = st.text_input("Full Name")
-        email = st.text_input("Email")
-        phone = st.text_input("Phone Number")
-        submit = st.form_submit_button("Register")
-
-        if submit:
-            if not name or not email or not phone:
-                st.error("⚠️ Please fill all fields.")
-            elif "@gmail.com" not in email:
-                st.error("⚠️ Please enter a valid Gmail address.")
-            else:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                c.execute("INSERT INTO attendees (name, email, phone, event_id) VALUES (?, ?, ?, ?)",
-                          (name, email, phone, event_id))
-                conn.commit()
-                conn.close()
-                st.success(f"✅ Registered successfully for {event[0]}!")
-
-# ----------------------------
-# Admin Dashboard
-# ----------------------------
-def admin_dashboard():
-    st.title("🛠️ Admin Dashboard")
-
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    # Announcements
-    st.subheader("📢 Manage Announcements")
-    with st.form("add_announcement"):
-        message = st.text_input("New Announcement")
-        submit = st.form_submit_button("Add")
-        if submit and message:
-            c.execute("INSERT INTO announcements (message) VALUES (?)", (message,))
-            conn.commit()
-            st.success("✅ Announcement added!")
-
-    announcements = c.execute("SELECT id, message FROM announcements ORDER BY id DESC").fetchall()
-    for ann in announcements:
-        if st.button(f"❌ Delete: {ann[1][:30]}...", key=f"delann{ann[0]}"):
-            c.execute("DELETE FROM announcements WHERE id=?", (ann[0],))
-            conn.commit()
-            st.success("✅ Announcement deleted!")
-            st.experimental_rerun()
-
-    # Events
-    st.subheader("📅 Manage Events")
-    with st.form("add_event"):
-        name = st.text_input("Event Name")
-        date = st.date_input("Event Date")
-        location = st.text_input("Event Location")
-        submit = st.form_submit_button("Add Event")
-        if submit and name and location:
-            c.execute("INSERT INTO events (name, date, location) VALUES (?, ?, ?)", (name, str(date), location))
-            conn.commit()
-            st.success("✅ Event added!")
-
-    events = c.execute("SELECT id, name FROM events ORDER BY date").fetchall()
-    for event in events:
-        st.write(f"### {event[1]}")
-        attendees = c.execute("SELECT name, email, phone FROM attendees WHERE event_id=?", (event[0],)).fetchall()
-        if attendees:
-            st.table(attendees)
+    if st.button("Login"):
+        if username == DEFAULT_USERNAME.lower() and password == DEFAULT_PASSWORD:
+            st.session_state.logged_in = True
+            st.success("✅ Login successful!")
+            st.rerun()
         else:
-            st.write("No attendees yet.")
+            st.error("❌ Invalid username or password")
 
-    conn.close()
+# =========================================================
+# 🔹 Chatbot Page
+# =========================================================
+def chatbot_page():
+    st.title("🧠 Gemini Chatbot + 🎨 Image Generator")
 
-# ----------------------------
-# Admin Login
-# ----------------------------
-def admin_login():
-    st.title("🔑 Admin Login")
+    # Logout option
+    if st.sidebar.button("Logout"):
+        st.session_state.logged_in = False
+        st.session_state.chat_history = []
+        st.session_state.llm_history = []
+        st.rerun()
 
-    if "admin_logged_in" not in st.session_state:
-        st.session_state.admin_logged_in = False
+    # Chat input
+    prompt = st.chat_input("Say something or type 'generate image: <your prompt>'...")
 
-    if st.session_state.admin_logged_in:
-        admin_dashboard()
-    else:
-        with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submit = st.form_submit_button("Login")
+    if prompt:
+        # Save user input
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        st.session_state.llm_history.append(HumanMessage(content=prompt))
 
-            if submit:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                admin = c.execute("SELECT * FROM admins WHERE username=? AND password=?", (username, password)).fetchone()
-                conn.close()
+        # ---- Image Generation ----
+        if "generate image:" in prompt.lower():
+            image_prompt = prompt.lower().replace("generate image:", "").strip()
+            with st.spinner("🎨 Generating image..."):
+                try:
+                    response = image_model.generate_content(image_prompt)
 
-                if admin:
-                    st.session_state.admin_logged_in = True
-                    st.experimental_rerun()
-                else:
-                    st.error("❌ Invalid username or password")
+                    text_response = ""
+                    image_data = None
 
-# ----------------------------
-# Main App Navigation
-# ----------------------------
-def main():
-    st.sidebar.title("📌 Navigation")
-    choice = st.sidebar.radio("Go to", ["Home", "Register", "Admin"])
+                    for part in response.candidates[0].content.parts:
+                        if getattr(part, "text", None):
+                            text_response += part.text
+                        elif getattr(part, "inline_data", None):
+                            img_bytes = base64.b64decode(part.inline_data.data)
+                            image_data = Image.open(BytesIO(img_bytes))
 
-    if choice == "Home":
-        home_page()
-    elif choice == "Register":
-        registration_page()
-    elif choice == "Admin":
-        admin_login()
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": text_response if text_response else "Here’s your generated image:",
+                        "image_data": image_data
+                    })
 
-# ----------------------------
-# Run App
-# ----------------------------
-if __name__ == "__main__":
-    init_db()
-    # reset_db()  # ⚠️ Uncomment once if schema mismatch occurs
-    main()
+                    if text_response:
+                        st.session_state.llm_history.append(AIMessage(content=text_response))
+
+                except Exception as e:
+                    error_msg = f"❌ Image generation failed: {str(e)}"
+                    st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
+                    st.session_state.llm_history.append(AIMessage(content=error_msg))
+
+        # ---- Text Chat ----
+        else:
+            with st.spinner("🤔 Thinking..."):
+                try:
+                    response = llm_text.invoke(st.session_state.llm_history)
+                    st.session_state.chat_history.append(
+                        {"role": "assistant", "content": response.content}
+                    )
+                    st.session_state.llm_history.append(AIMessage(content=response.content))
+                except Exception as e:
+                    error_msg = f"❌ Chat generation failed: {str(e)}"
+                    st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
+                    st.session_state.llm_history.append(AIMessage(content=error_msg))
+
+    # ---- Display Chat History ----
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.chat_message("user").write(msg["content"])
+        elif msg["role"] == "assistant":
+            if "image_data" in msg and msg["image_data"] is not None:
+                st.chat_message("assistant").image(msg["image_data"], caption="Generated Image")
+            st.chat_message("assistant").write(msg["content"])
+
+# =========================================================
+# 🔹 App Flow
+# =========================================================
+if not st.session_state.logged_in:
+    login_page()
+else:
+    chatbot_page()
