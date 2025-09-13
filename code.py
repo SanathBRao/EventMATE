@@ -36,6 +36,7 @@ def init_db():
             name TEXT NOT NULL,
             email TEXT NOT NULL,
             phone TEXT NOT NULL,
+            username TEXT NOT NULL,
             event_id INTEGER NOT NULL,
             FOREIGN KEY(event_id) REFERENCES events(id)
         )
@@ -63,11 +64,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-def reset_db():
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-    init_db()
-
 # ----------------------------
 # Login Page
 # ----------------------------
@@ -85,12 +81,11 @@ def login_page():
         conn.close()
 
         if account:
-            role = account[0]
             st.session_state["logged_in"] = True
             st.session_state["username"] = username
-            st.session_state["role"] = role
-            st.success(f"✅ Logged in as {role.capitalize()}")
-            st.experimental_rerun()
+            st.session_state["role"] = account[0]
+            st.success(f"✅ Logged in as {account[0].capitalize()}")
+            st.rerun()
         else:
             st.error("❌ Invalid username or password")
 
@@ -125,7 +120,7 @@ def home_page():
                 if st.button(f"Register for {event[1]}", key=f"regbtn{event[0]}"):
                     st.session_state["register_event_id"] = event[0]
                     st.session_state["page"] = "register"
-                    st.experimental_rerun()
+                    st.rerun()
     else:
         st.write("No events available.")
 
@@ -159,11 +154,46 @@ def registration_page():
             else:
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
-                c.execute("INSERT INTO attendees (name, email, phone, event_id) VALUES (?, ?, ?, ?)",
-                          (name, email, phone, event_id))
+                c.execute("INSERT INTO attendees (name, email, phone, username, event_id) VALUES (?, ?, ?, ?, ?)",
+                          (name, email, phone, st.session_state['username'], event_id))
                 conn.commit()
                 conn.close()
                 st.success(f"✅ Registered successfully for {event[0]}!")
+
+# ----------------------------
+# User Dashboard (My Registrations)
+# ----------------------------
+def user_dashboard():
+    st.title("🎉 My Registrations")
+
+    username = st.session_state.get("username")
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    regs = c.execute("""
+        SELECT e.id, e.name, e.date, e.location, a.name, a.email, a.phone
+        FROM attendees a
+        JOIN events e ON a.event_id = e.id
+        WHERE a.username=?
+    """, (username,)).fetchall()
+    conn.close()
+
+    if regs:
+        for r in regs:
+            st.write(f"### {r[1]} ({r[2]} @ {r[3]})")
+            st.write(f"- You registered as: {r[4]} | {r[5]} | {r[6]}")
+            
+            # Show others registered for same event
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            others = c.execute("""
+                SELECT name, email, phone FROM attendees WHERE event_id=?
+            """, (r[0],)).fetchall()
+            conn.close()
+
+            st.write("👥 Other Registered People:")
+            st.table(others)
+    else:
+        st.info("You have not registered for any events yet.")
 
 # ----------------------------
 # Admin Dashboard
@@ -183,7 +213,7 @@ def admin_dashboard():
             c.execute("INSERT INTO announcements (message) VALUES (?)", (message,))
             conn.commit()
             st.success("✅ Announcement added!")
-            st.experimental_rerun()
+            st.rerun()
 
     announcements = c.execute("SELECT id, message FROM announcements ORDER BY id DESC").fetchall()
     for ann in announcements:
@@ -191,7 +221,7 @@ def admin_dashboard():
             c.execute("DELETE FROM announcements WHERE id=?", (ann[0],))
             conn.commit()
             st.success("✅ Announcement deleted!")
-            st.experimental_rerun()
+            st.rerun()
 
     # Events
     st.subheader("📅 Manage Events")
@@ -204,7 +234,7 @@ def admin_dashboard():
             c.execute("INSERT INTO events (name, date, location) VALUES (?, ?, ?)", (name, str(date), location))
             conn.commit()
             st.success("✅ Event added!")
-            st.experimental_rerun()
+            st.rerun()
 
     events = c.execute("SELECT id, name FROM events ORDER BY date").fetchall()
     for event in events:
@@ -218,7 +248,7 @@ def admin_dashboard():
     conn.close()
 
 # ----------------------------
-# Main App Navigation
+# Main App
 # ----------------------------
 def main():
     st.sidebar.title("📌 Navigation")
@@ -233,7 +263,7 @@ def main():
 
         menu = ["Home"]
         if st.session_state["role"] == "user":
-            menu.append("Register")
+            menu.extend(["Register", "My Registrations"])
         if st.session_state["role"] == "admin":
             menu.append("Admin")
 
@@ -243,15 +273,15 @@ def main():
             home_page()
         elif choice == "Register" and st.session_state["role"] == "user":
             registration_page()
+        elif choice == "My Registrations" and st.session_state["role"] == "user":
+            user_dashboard()
         elif choice == "Admin" and st.session_state["role"] == "admin":
             admin_dashboard()
 
         if st.sidebar.button("🚪 Logout"):
-            st.session_state["logged_in"] = False
-            st.session_state["username"] = ""
-            st.session_state["role"] = ""
+            st.session_state.clear()
             st.success("Logged out successfully.")
-            st.experimental_rerun()
+            st.rerun()
 
 # ----------------------------
 # Run App
