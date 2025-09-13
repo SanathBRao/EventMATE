@@ -29,7 +29,7 @@ def init_db():
         )
     """)
 
-    # Attendees (linked to events)
+    # Attendees
     c.execute("""
         CREATE TABLE IF NOT EXISTS attendees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +42,7 @@ def init_db():
         )
     """)
 
-    # Users/Admins
+    # Users (Admin & normal users)
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,7 +52,7 @@ def init_db():
         )
     """)
 
-    # Insert default admin & user if not exist
+    # Insert default accounts if missing
     c.execute("SELECT * FROM users WHERE username=?", ("admin",))
     if not c.fetchone():
         c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", ("admin", "admin123", "admin"))
@@ -63,6 +63,14 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+# ----------------------------
+# Reset Database
+# ----------------------------
+def reset_db():
+    if os.path.exists(DB_FILE):
+        os.remove(DB_FILE)
+    init_db()
 
 # ----------------------------
 # Login Page
@@ -98,8 +106,9 @@ def home_page():
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-
     announcements = c.execute("SELECT message FROM announcements ORDER BY id DESC").fetchall()
+    conn.close()
+
     if announcements:
         for ann in announcements:
             st.info(ann[0])
@@ -107,6 +116,8 @@ def home_page():
         st.write("No announcements yet.")
 
     st.subheader("📅 Upcoming Events")
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
     events = c.execute("SELECT id, name, date, location FROM events ORDER BY date").fetchall()
     conn.close()
 
@@ -161,7 +172,7 @@ def registration_page():
                 st.success(f"✅ Registered successfully for {event[0]}!")
 
 # ----------------------------
-# User Dashboard (My Registrations)
+# User Dashboard
 # ----------------------------
 def user_dashboard():
     st.title("🎉 My Registrations")
@@ -181,13 +192,11 @@ def user_dashboard():
         for r in regs:
             st.write(f"### {r[1]} ({r[2]} @ {r[3]})")
             st.write(f"- You registered as: {r[4]} | {r[5]} | {r[6]}")
-            
-            # Show others registered for same event
+
+            # Show others for same event
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            others = c.execute("""
-                SELECT name, email, phone FROM attendees WHERE event_id=?
-            """, (r[0],)).fetchall()
+            others = c.execute("SELECT name, email, phone FROM attendees WHERE event_id=?", (r[0],)).fetchall()
             conn.close()
 
             st.write("👥 Other Registered People:")
@@ -203,6 +212,12 @@ def admin_dashboard():
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+
+    # Reset DB Button
+    if st.button("⚠️ Reset Database (Danger)"):
+        reset_db()
+        st.success("✅ Database has been reset!")
+        st.rerun()
 
     # Announcements
     st.subheader("📢 Manage Announcements")
