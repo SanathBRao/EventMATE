@@ -1,8 +1,74 @@
 import streamlit as st
 import sqlite3
 import os
+import hashlib
 
 DB_FILE = "eventmate.db"
+
+# ----------------------------
+# Password Hashing
+# ----------------------------
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def check_password(password: str, hashed: str) -> bool:
+    return hash_password(password) == hashed
+
+# ----------------------------
+# Custom CSS for Styling
+# ----------------------------
+def set_custom_theme():
+    st.markdown(
+        """
+        <style>
+        /* Background */
+        .stApp {
+            background: linear-gradient(135deg, #E3F2FD, #E8F6F3);
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        /* Sidebar */
+        section[data-testid="stSidebar"] {
+            background-color: #2E4053 !important;
+        }
+        section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] label {
+            color: white !important;
+        }
+
+        /* Buttons */
+        div.stButton > button {
+            background-color: #3498DB;
+            color: white;
+            border-radius: 10px;
+            border: none;
+            padding: 0.6em;
+            font-weight: bold;
+        }
+        div.stButton > button:hover {
+            background-color: #2ECC71;
+            color: white;
+        }
+
+        /* Info, Success, Error boxes */
+        .stAlert {
+            border-radius: 10px;
+        }
+
+        /* Tables */
+        .stDataFrame, .stTable {
+            border: 2px solid #2E86C1;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        /* Headings */
+        h1, h2, h3 {
+            color: #154360 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
 # ----------------------------
 # Database Setup
@@ -42,7 +108,7 @@ def init_db():
         )
     """)
 
-    # Users (Admin & normal users)
+    # Users
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,14 +118,11 @@ def init_db():
         )
     """)
 
-    # Insert default accounts if missing
+    # Insert default admin if missing
     c.execute("SELECT * FROM users WHERE username=?", ("admin",))
     if not c.fetchone():
-        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", ("admin", "admin123", "admin"))
-
-    c.execute("SELECT * FROM users WHERE username=?", ("user",))
-    if not c.fetchone():
-        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", ("user", "user123", "user"))
+        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                  ("admin", hash_password("admin123"), "admin"))
 
     conn.commit()
     conn.close()
@@ -76,34 +139,71 @@ def reset_db():
 # Login Page
 # ----------------------------
 def login_page():
-    st.title("🔑 Login")
+    st.markdown("<h2 style='color:#2E86C1;'>🔑 Login</h2>", unsafe_allow_html=True)
 
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
-    if st.button("Login"):
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
-        account = c.fetchone()
-        conn.close()
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("Login", use_container_width=True):
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute("SELECT password, role FROM users WHERE username=?", (username,))
+            account = c.fetchone()
+            conn.close()
 
-        if account:
-            st.session_state["logged_in"] = True
-            st.session_state["username"] = username
-            st.session_state["role"] = account[0]
-            st.success(f"✅ Logged in as {account[0].capitalize()}")
+            if account and check_password(password, account[0]):
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = username
+                st.session_state["role"] = account[1]
+                st.success(f"✅ Logged in as {account[1].capitalize()}")
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password")
+
+    with col2:
+        if st.button("Go to Signup", use_container_width=True):
+            st.session_state["page"] = "signup"
             st.rerun()
+
+# ----------------------------
+# Signup Page
+# ----------------------------
+def signup_page():
+    st.markdown("<h2 style='color:#28B463;'>📝 Signup</h2>", unsafe_allow_html=True)
+
+    new_username = st.text_input("Choose a Username")
+    new_password = st.text_input("Choose a Password", type="password")
+
+    if st.button("Create Account", use_container_width=True):
+        if not new_username or not new_password:
+            st.error("⚠️ Please fill all fields.")
         else:
-            st.error("❌ Invalid username or password")
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            try:
+                c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, 'user')",
+                          (new_username, hash_password(new_password)))
+                conn.commit()
+                st.success("✅ Account created! Please login now.")
+                st.session_state["page"] = "login"
+                st.rerun()
+            except sqlite3.IntegrityError:
+                st.error("⚠️ Username already exists. Try another.")
+            conn.close()
+
+    if st.button("⬅️ Back to Login", use_container_width=True):
+        st.session_state["page"] = "login"
+        st.rerun()
 
 # ----------------------------
 # Home Page
 # ----------------------------
 def home_page():
-    st.title("🏠 EventMate")
-    st.subheader("📢 Announcements")
+    st.markdown("<h2 style='color:#8E44AD;'>🏠 Welcome to EventMate</h2>", unsafe_allow_html=True)
 
+    st.subheader("📢 Announcements")
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     announcements = c.execute("SELECT message FROM announcements ORDER BY id DESC").fetchall()
@@ -123,10 +223,11 @@ def home_page():
 
     if events:
         for event in events:
-            st.write(f"### {event[1]}")
-            st.write(f"📆 Date: {event[2]}")
-            st.write(f"📍 Location: {event[3]}")
-
+            st.markdown(f"""
+                <div style='background:#D6EAF8;padding:10px;border-radius:8px;margin-bottom:8px;'>
+                    <b>{event[1]}</b><br>📆 {event[2]}<br>📍 {event[3]}
+                </div>
+            """, unsafe_allow_html=True)
             if st.session_state.get("role") == "user":
                 if st.button(f"Register for {event[1]}", key=f"regbtn{event[0]}"):
                     st.session_state["register_event_id"] = event[0]
@@ -149,7 +250,7 @@ def registration_page():
     event = c.execute("SELECT name FROM events WHERE id=?", (event_id,)).fetchone()
     conn.close()
 
-    st.title(f"📝 Register for {event[0]}")
+    st.markdown(f"<h2 style='color:#CA6F1E;'>📝 Register for {event[0]}</h2>", unsafe_allow_html=True)
 
     with st.form("registration_form"):
         name = st.text_input("Full Name")
@@ -175,7 +276,7 @@ def registration_page():
 # User Dashboard
 # ----------------------------
 def user_dashboard():
-    st.title("🎉 My Registrations")
+    st.markdown("<h2 style='color:#1ABC9C;'>🎉 My Registrations</h2>", unsafe_allow_html=True)
 
     username = st.session_state.get("username")
     conn = sqlite3.connect(DB_FILE)
@@ -190,10 +291,13 @@ def user_dashboard():
 
     if regs:
         for r in regs:
-            st.write(f"### {r[1]} ({r[2]} @ {r[3]})")
-            st.write(f"- You registered as: {r[4]} | {r[5]} | {r[6]}")
+            st.markdown(f"""
+                <div style='background:#F9E79F;padding:10px;border-radius:8px;margin-bottom:8px;'>
+                    <b>{r[1]}</b> ({r[2]} @ {r[3]})<br>
+                    👉 You: {r[4]} | {r[5]} | {r[6]}
+                </div>
+            """, unsafe_allow_html=True)
 
-            # Show others for same event
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
             others = c.execute("SELECT name, email, phone FROM attendees WHERE event_id=?", (r[0],)).fetchall()
@@ -208,18 +312,16 @@ def user_dashboard():
 # Admin Dashboard
 # ----------------------------
 def admin_dashboard():
-    st.title("🛠️ Admin Dashboard")
+    st.markdown("<h2 style='color:#C0392B;'>🛠️ Admin Dashboard</h2>", unsafe_allow_html=True)
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
-    # Reset DB Button
-    if st.button("⚠️ Reset Database (Danger)"):
+    if st.button("⚠️ Reset Database (Danger)", use_container_width=True):
         reset_db()
         st.success("✅ Database has been reset!")
         st.rerun()
 
-    # Announcements
     st.subheader("📢 Manage Announcements")
     with st.form("add_announcement"):
         message = st.text_input("New Announcement")
@@ -238,7 +340,6 @@ def admin_dashboard():
             st.success("✅ Announcement deleted!")
             st.rerun()
 
-    # Events
     st.subheader("📅 Manage Events")
     with st.form("add_event"):
         name = st.text_input("Event Name")
@@ -253,7 +354,7 @@ def admin_dashboard():
 
     events = c.execute("SELECT id, name FROM events ORDER BY date").fetchall()
     for event in events:
-        st.write(f"### {event[1]}")
+        st.markdown(f"### {event[1]}")
         attendees = c.execute("SELECT name, email, phone FROM attendees WHERE event_id=?", (event[0],)).fetchall()
         if attendees:
             st.table(attendees)
@@ -266,13 +367,19 @@ def admin_dashboard():
 # Main App
 # ----------------------------
 def main():
+    set_custom_theme()  # Apply CSS theme
     st.sidebar.title("📌 Navigation")
 
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
+    if "page" not in st.session_state:
+        st.session_state["page"] = "login"
 
     if not st.session_state["logged_in"]:
-        login_page()
+        if st.session_state["page"] == "login":
+            login_page()
+        elif st.session_state["page"] == "signup":
+            signup_page()
     else:
         st.sidebar.success(f"Logged in as {st.session_state['username']} ({st.session_state['role']})")
 
@@ -293,7 +400,7 @@ def main():
         elif choice == "Admin" and st.session_state["role"] == "admin":
             admin_dashboard()
 
-        if st.sidebar.button("🚪 Logout"):
+        if st.sidebar.button("🚪 Logout", use_container_width=True):
             st.session_state.clear()
             st.success("Logged out successfully.")
             st.rerun()
