@@ -62,6 +62,18 @@ def init_db():
         )
     """)
 
+    # Feedback
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            event_id INTEGER NOT NULL,
+            rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+            comments TEXT,
+            FOREIGN KEY(event_id) REFERENCES events(id)
+        )
+    """)
+
     # Insert default admin if missing
     c.execute("SELECT * FROM users WHERE username=?", ("admin",))
     if not c.fetchone():
@@ -245,14 +257,27 @@ def user_dashboard():
             st.write(f"### {r[1]} ({r[2]} @ {r[3]})")
             st.write(f"- You registered as: {r[4]} | {r[5]} | {r[6]}")
 
-            # Show others for same event
+            # Show others
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
             others = c.execute("SELECT name, email, phone FROM attendees WHERE event_id=?", (r[0],)).fetchall()
             conn.close()
-
             st.write("👥 Other Registered People:")
             st.table(others)
+
+            # Feedback section
+            st.write("⭐ Leave Feedback for this Event")
+            rating = st.slider(f"Rate {r[1]} (1 = Poor, 5 = Excellent)", 1, 5, 3, key=f"rate{r[0]}")
+            comments = st.text_area("Your comments (optional)", key=f"comm{r[0]}")
+            if st.button("Submit Feedback", key=f"fbbtn{r[0]}"):
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
+                c.execute("INSERT INTO feedback (username, event_id, rating, comments) VALUES (?, ?, ?, ?)",
+                          (st.session_state['username'], r[0], rating, comments))
+                conn.commit()
+                conn.close()
+                st.success("✅ Feedback submitted successfully!")
+                st.rerun()
     else:
         st.info("You have not registered for any events yet.")
 
@@ -265,7 +290,7 @@ def admin_dashboard():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
-    # Reset DB Button
+    # Reset DB
     if st.button("⚠️ Reset Database (Danger)"):
         reset_db()
         st.success("✅ Database has been reset!")
@@ -315,6 +340,42 @@ def admin_dashboard():
     conn.close()
 
 # ----------------------------
+# Post-Event Analysis
+# ----------------------------
+def post_event_analysis():
+    st.title("📊 Post-Event Analysis")
+
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    events = c.execute("SELECT id, name FROM events").fetchall()
+
+    if not events:
+        st.info("No events available for analysis.")
+        return
+
+    for e in events:
+        st.subheader(f"📌 {e[1]}")
+
+        # Total registrations
+        total_regs = c.execute("SELECT COUNT(*) FROM attendees WHERE event_id=?", (e[0],)).fetchone()[0]
+
+        # Feedback stats
+        avg_rating = c.execute("SELECT AVG(rating) FROM feedback WHERE event_id=?", (e[0],)).fetchone()[0]
+        feedbacks = c.execute("SELECT username, rating, comments FROM feedback WHERE event_id=?", (e[0],)).fetchall()
+
+        st.write(f"👥 Total Registrations: {total_regs}")
+        st.write(f"⭐ Average Rating: {avg_rating:.1f}" if avg_rating else "⭐ No feedback yet")
+
+        if feedbacks:
+            st.markdown("📝 **Feedback received:**")
+            for fb in feedbacks:
+                st.markdown(f"- **{fb[0]}** rated {fb[1]} ⭐ — {fb[2] if fb[2] else 'No comment'}")
+        else:
+            st.info("No feedback submitted.")
+
+    conn.close()
+
+# ----------------------------
 # Main App
 # ----------------------------
 def main():
@@ -338,6 +399,7 @@ def main():
             menu.extend(["Register", "My Registrations"])
         if st.session_state["role"] == "admin":
             menu.append("Admin")
+            menu.append("Post-Event Analysis")
 
         choice = st.sidebar.radio("Go to", menu)
 
@@ -349,6 +411,8 @@ def main():
             user_dashboard()
         elif choice == "Admin" and st.session_state["role"] == "admin":
             admin_dashboard()
+        elif choice == "Post-Event Analysis" and st.session_state["role"] == "admin":
+            post_event_analysis()
 
         if st.sidebar.button("🚪 Logout"):
             st.session_state.clear()
