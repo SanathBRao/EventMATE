@@ -1,8 +1,18 @@
 import streamlit as st
 import sqlite3
 import os
+import hashlib
 
 DB_FILE = "eventmate.db"
+
+# ----------------------------
+# Password Hashing
+# ----------------------------
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def check_password(password: str, hashed: str) -> bool:
+    return hash_password(password) == hashed
 
 # ----------------------------
 # Database Setup
@@ -55,7 +65,8 @@ def init_db():
     # Insert default admin if missing
     c.execute("SELECT * FROM users WHERE username=?", ("admin",))
     if not c.fetchone():
-        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", ("admin", "admin123", "admin"))
+        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                  ("admin", hash_password("admin123"), "admin"))
 
     conn.commit()
     conn.close()
@@ -82,15 +93,15 @@ def login_page():
         if st.button("Login"):
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            c.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
+            c.execute("SELECT password, role FROM users WHERE username=?", (username,))
             account = c.fetchone()
             conn.close()
 
-            if account:
+            if account and check_password(password, account[0]):
                 st.session_state["logged_in"] = True
                 st.session_state["username"] = username
-                st.session_state["role"] = account[0]
-                st.success(f"✅ Logged in as {account[0].capitalize()}")
+                st.session_state["role"] = account[1]
+                st.success(f"✅ Logged in as {account[1].capitalize()}")
                 st.rerun()
             else:
                 st.error("❌ Invalid username or password")
@@ -112,12 +123,18 @@ def signup_page():
     if st.button("Create Account"):
         if not new_username or not new_password:
             st.error("⚠️ Please fill all fields.")
+        elif len(new_password) < 6:
+            st.error("⚠️ Password must be at least 6 characters long.")
+        elif not any(c.isdigit() for c in new_password):
+            st.error("⚠️ Password must contain at least one number.")
+        elif not any(c.isalpha() for c in new_password):
+            st.error("⚠️ Password must contain at least one letter.")
         else:
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
             try:
                 c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, 'user')",
-                          (new_username, new_password))
+                          (new_username, hash_password(new_password)))
                 conn.commit()
                 st.success("✅ Account created! Please login now.")
                 st.session_state["page"] = "login"
@@ -195,6 +212,8 @@ def registration_page():
                 st.error("⚠️ Please fill all fields.")
             elif "@gmail.com" not in email:
                 st.error("⚠️ Please enter a valid Gmail address.")
+            elif not (phone.isdigit() and len(phone) == 10):
+                st.error("⚠️ Phone number must be exactly 10 digits.")
             else:
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
@@ -226,7 +245,6 @@ def user_dashboard():
             st.write(f"### {r[1]} ({r[2]} @ {r[3]})")
             st.write(f"- You registered as: {r[4]} | {r[5]} | {r[6]}")
 
-            # Show others for same event
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
             others = c.execute("SELECT name, email, phone FROM attendees WHERE event_id=?", (r[0],)).fetchall()
