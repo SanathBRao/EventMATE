@@ -52,7 +52,7 @@ def init_db():
         )
     """)
 
-    # Users (Admin & normal users)
+    # Users
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,7 +90,7 @@ def login_page():
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("Login"):
+        if st.button("Login", use_container_width=True):
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
             c.execute("SELECT password, role FROM users WHERE username=?", (username,))
@@ -107,7 +107,7 @@ def login_page():
                 st.error("❌ Invalid username or password")
 
     with col2:
-        if st.button("Go to Signup"):
+        if st.button("Go to Signup", use_container_width=True):
             st.session_state["page"] = "signup"
             st.rerun()
 
@@ -120,7 +120,7 @@ def signup_page():
     new_username = st.text_input("Choose a Username")
     new_password = st.text_input("Choose a Password", type="password")
 
-    if st.button("Create Account"):
+    if st.button("Create Account", use_container_width=True):
         if not new_username or not new_password:
             st.error("⚠️ Please fill all fields.")
         elif len(new_password) < 6:
@@ -143,7 +143,7 @@ def signup_page():
                 st.error("⚠️ Username already exists. Try another.")
             conn.close()
 
-    if st.button("⬅️ Back to Login"):
+    if st.button("⬅️ Back to Login", use_container_width=True):
         st.session_state["page"] = "login"
         st.rerun()
 
@@ -212,8 +212,8 @@ def registration_page():
                 st.error("⚠️ Please fill all fields.")
             elif "@gmail.com" not in email:
                 st.error("⚠️ Please enter a valid Gmail address.")
-            elif not (phone.isdigit() and len(phone) == 10):
-                st.error("⚠️ Phone number must be exactly 10 digits.")
+            elif not phone.isdigit() or len(phone) != 10:
+                st.error("⚠️ Phone number must be exactly 10 digits (numbers only).")
             else:
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
@@ -245,6 +245,7 @@ def user_dashboard():
             st.write(f"### {r[1]} ({r[2]} @ {r[3]})")
             st.write(f"- You registered as: {r[4]} | {r[5]} | {r[6]}")
 
+            # Show others for same event
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
             others = c.execute("SELECT name, email, phone FROM attendees WHERE event_id=?", (r[0],)).fetchall()
